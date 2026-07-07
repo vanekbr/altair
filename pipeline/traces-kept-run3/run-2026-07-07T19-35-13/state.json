@@ -1,0 +1,64 @@
+{
+  "runId": "run-2026-07-07T19-35-13",
+  "branch": "agent/run-2026-07-07T19-35-13",
+  "baseBranch": "develop",
+  "status": "done",
+  "issue": {
+    "id": 2,
+    "title": "[BUG] Pasting into the URL box is broken",
+    "body": "### Is there an existing issue for this?\n\n- [X] I have searched the existing issues\n\n### Current Behavior\n\nIf you highlight a substring of text in the URL box, and then paste over it, the behavior isn't expected.\n\n### Expected Behavior\n\nIn GraphQL mode, highlight a portion of the URL and attempt to replace it by pasting.\n\nThe expected behavior is for only the highlighted portion to be replaced.\n\n### Steps To Reproduce\n\n1. Go to GraphQL mode\n2. Set a URL\n3. Highlight a portion of that URL (like the URL path or the subdomain)\n4. \"Paste to replace\"\n\n### Environment\n\n```markdown\n- OS: macOS Sequoia 15.0.1 / Apple M3 Pro\n- Browser: Arc\n- Platform:\n- Version: Latest as of this ticket's creation timestamp\n```\n\n\n### Additional context\n\n_No response_\n"
+  },
+  "triage": {
+    "files": [
+      "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts"
+    ],
+    "hypothesis": "The paste handler in XInputComponent (lines 136-151) is broken. When a user selects text and pastes, the code intercepts the paste event and reconstructs the change by taking the entire new document with `tr.newDoc.toString()`, then inserting it from position 0. This overwrites the original selection information. The correct behavior should preserve the original change ranges (which already represent the selected text being replaced) and only replace newlines in the pasted content. Currently, `from: 0, insert: tr.newDoc.toString().replace(/\\n/g, ' ')` replaces everything from the document start, ignoring that the user only wanted to replace the selected portion.",
+    "confidence": "high"
+  },
+  "repro": {
+    "testFilePath": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.repro.spec.ts",
+    "expectedBehavior": "When pasting 'new.site' to replace a selected substring 'example.com' in the URL 'https://example.com/path', only the selected portion should be replaced, resulting in 'https://new.site/path'",
+    "actualBehavior": "The paste filter replaces the entire document from position 0, resulting in corrupted output like 'https://new.sitem/pathhttps://example.com/path' instead of preserving the unselected portions of the original text",
+    "failingOutput": "\nFAIL src/app/modules/altair/components/x-input/x-input.repro.spec.ts\n  ● XInputComponent paste bug › should only replace the selected text when pasting, not the entire document\n\n    expect(received).toBe(expected) // Object.is equality\n\n    Expected: \"https://new.site/path\"\n    Received: \"https://new.sitem/pathhttps://example.com/path\"\n\n      54 |     // \"https://new.site/path\"\n      55 |     // NOT just \"new.site\" (which is the current buggy behavior)\n    > 56 |     expect(tr.newDoc.toString()).toBe('https://new.site/path');\n         |                                  ^\n      57 |   });\n      58 | });\n      59 |\n\n      at src/app/modules/altair/components/x-input/x-input.repro.spec.ts:56:34\n      at _ZoneDelegate.invoke (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone.umd.js:416:32)\n      at ProxyZoneSpec.Object.<anonymous>.ProxyZoneSpec.onInvoke (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone-testing.umd.js:2176:43)\n      at _ZoneDelegate.invoke (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone.umd.js:415:38)\n      at ZoneImpl.run (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone.umd.js:147:47)\n      at Object.wrappedFunc (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone-testing.umd.js:450:38)\n\nTest Suites: 1 failed, 1 total\nTests:       1 failed, 1 total\nSnapshots:   0 total\nTime:        1.554 s, estimated 2 s\n"
+  },
+  "fix": {
+    "changedFiles": [
+      "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts",
+      "packages/altair-app/src/app/modules/altair/components/x-input/x-input.repro.spec.ts"
+    ],
+    "diffSummary": "Removed problematic token extension logic that was accidentally deleting characters outside the user's selection. Fixed test's off-by-one error in selection range (to: 18 → to: 19) to correctly simulate pasting over 'example.com'. Implementation now uses simple, correct logic: iterate changes and replace newlines only.",
+    "riskNotes": "The test modification addresses a legitimate off-by-one error in the test itself (was testing paste over incomplete 'example.co' instead of full 'example.com'). The removed extension logic was a workaround for this test error and would have caused regressions in real paste scenarios.",
+    "attempts": 2
+  },
+  "critic": {
+    "verdict": "approve",
+    "reasons": "The fix correctly addresses the root cause. The old code called `tr.newDoc.toString()` to get the post-paste full document and then inserted it at `from: 0` with no `to`, meaning it was a pure insertion at position 0 rather than a replacement — this would prepend the sanitised full doc to the original document instead of replacing the pasted range. The new code iterates the actual change set via `iterChanges`, extracts `fromA`/`toA` (pre-change positions, correct for building a `ChangeSpec`) and the `Text` object for the inserted content, replaces newlines only in the pasted fragment, and returns the corrected changes. This preserves all surrounding text unchanged. The `iterChanges` callback type signature (`fromA, toA, fromB, toB, inserted: Text`) confirms the arguments are used correctly at x-input.component.ts:142–147. The non-paste guard at x-input.component.ts:153 is untouched. The repro test is a genuine regression test that exercises the filter through a real `EditorState` with the extensions active; no existing tests were weakened.",
+    "claims": [
+      {
+        "text": "Old code took tr.newDoc.toString() (entire post-paste document) and inserted it at position 0 with no `to`, meaning it was a pure insert rather than a replacement of the pasted range",
+        "cite": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts:139"
+      },
+      {
+        "text": "New code iterates actual changes via iterChanges and uses fromA/toA (pre-change positions) with insert.toString() for the pasted Text object",
+        "cite": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts:142"
+      },
+      {
+        "text": "Newline replacement is correctly applied only to the inserted text fragment, not the whole document",
+        "cite": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts:146"
+      },
+      {
+        "text": "Non-paste multi-line guard is untouched and still correct",
+        "cite": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts:153"
+      },
+      {
+        "text": "Repro test exercises the filter through a real EditorState with extensions, asserting paste over a range preserves surrounding text",
+        "cite": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.repro.spec.ts:48"
+      }
+    ]
+  },
+  "pr": {
+    "title": "fix: preserve selection when pasting into URL box",
+    "body": "## Problem\n\nWhen a user highlights text in the URL box and pastes to replace it, the pasted content does not correctly replace only the selected portion (#2).\n\n## Root cause\n\nThe paste handler in `XInputComponent` (lines 136–151) was intercepting paste events and reconstructing the change by taking the entire document with `tr.newDoc.toString()`, then inserting it from position 0 with no `to` parameter. This effectively prepended the sanitized full document to the original instead of replacing only the selected range, because insertion at `from: 0` with no `to` is a pure insertion, not a replacement.\n\n## Fix\n\nReplaced the problematic logic with correct paste handling:\n- Iterate the actual change set via `iterChanges` callback\n- Extract `fromA`/`toA` (pre-change positions) and the inserted `Text` object\n- Replace only newlines in the pasted content fragment\n- Return corrected changes, preserving all surrounding text\n\nThis also required fixing an off-by-one error in the repro test where the selection range was `to: 18` instead of `to: 19`, causing it to test pasting over incomplete `'example.co'` rather than the full `'example.com'`.\n\n**Changed files:**\n- `packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts`\n- `packages/altair-app/src/app/modules/altair/components/x-input/x-input.repro.spec.ts`\n\n## Evidence\n\nRepro test: `packages/altair-app/src/app/modules/altair/components/x-input/x-input.repro.spec.ts`\n- Was red on develop, green with this fix\n- Full test suite passes\n\n## Review\n\n**Verdict:** Approve\n\nThe fix correctly addresses the root cause. The old code's logic was fundamentally broken: calling `tr.newDoc.toString()` and inserting at `from: 0` with no `to` would prepend rather than replace. The new code correctly uses `iterChanges` to extract the pre-change positions (`fromA`, `toA`) and inserted text, which are the correct arguments for `ChangeSpec`. The `iterChanges` callback type signature `(fromA, toA, fromB, toB, inserted: Text)` confirms the arguments are used correctly at lines 142–147. The non-paste guard at line 153 is untouched. The repro test is a genuine regression test that exercises the filter through a real `EditorState` with extensions active; no existing tests were weakened.\n\n## Risk & rollback\n\nThe test modification fixes a legitimate off-by-one error in the test itself. The removed extension logic was a workaround for this test error and would have caused regressions in real paste scenarios.\n\nRollback: Revert this single PR.",
+    "url": "https://github.com/vanekbr/altair/pull/3"
+  }
+}
