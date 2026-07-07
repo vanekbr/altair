@@ -1,0 +1,19 @@
+{
+  "name": "bugfix-pipeline",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Multi-agent bug-fix pipeline: GitHub issue -> triage -> failing repro test -> fix -> critic -> PR",
+  "scripts": {
+    "pipeline": "tsx run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
