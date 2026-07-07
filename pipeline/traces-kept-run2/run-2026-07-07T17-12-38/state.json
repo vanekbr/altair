@@ -1,0 +1,25 @@
+{
+  "runId": "run-2026-07-07T17-12-38",
+  "branch": "agent/run-2026-07-07T17-12-38",
+  "baseBranch": "develop",
+  "status": "escalated",
+  "issue": {
+    "id": 2,
+    "title": "[BUG] Pasting into the URL box is broken",
+    "body": "### Is there an existing issue for this?\n\n- [X] I have searched the existing issues\n\n### Current Behavior\n\nIf you highlight a substring of text in the URL box, and then paste over it, the behavior isn't expected.\n\n### Expected Behavior\n\nIn GraphQL mode, highlight a portion of the URL and attempt to replace it by pasting.\n\nThe expected behavior is for only the highlighted portion to be replaced.\n\n### Steps To Reproduce\n\n1. Go to GraphQL mode\n2. Set a URL\n3. Highlight a portion of that URL (like the URL path or the subdomain)\n4. \"Paste to replace\"\n\n### Environment\n\n```markdown\n- OS: macOS Sequoia 15.0.1 / Apple M3 Pro\n- Browser: Arc\n- Platform:\n- Version: Latest as of this ticket's creation timestamp\n```\n\n\n### Additional context\n\n_No response_\n"
+  },
+  "triage": {
+    "files": [
+      "packages/altair-app/src/app/modules/altair/components/x-input/x-input.component.ts"
+    ],
+    "hypothesis": "In `x-input.component.ts:139-148`, the `filterNewLine` transaction filter incorrectly handles paste events. When a user selects text and pastes, the filter intercepts the transaction and reconstructs it with `from: 0` and `insert: tr.newDoc.toString().replace(/\\n/g, ' ')`. This ignores the original change's position and selection, always inserting from the beginning instead of respecting the selected range. The filter should preserve the original transaction's change locations and only strip newlines from the inserted content, not rebuild the entire transaction.",
+    "confidence": "high"
+  },
+  "repro": {
+    "testFilePath": "packages/altair-app/src/app/modules/altair/components/x-input/x-input.repro.spec.ts",
+    "expectedBehavior": "When pasting 'newhost.com' over selected text 'api.example.com' in URL 'https://api.example.com/graphql', only the selected portion should be replaced, resulting in 'https://newhost.com/graphql'",
+    "actualBehavior": "The filter incorrectly rebuilds the paste transaction with `from: 0`, inserting the entire new document from the beginning, resulting in corrupted output: 'https://newhost.com/graphqlhttps://api.example.com/graphql'",
+    "failingOutput": "\nFAIL src/app/modules/altair/components/x-input/x-input.repro.spec.ts\n  ● XInputComponent - Paste Selection Bug › should replace only selected text when pasting, not from position 0\n\n    expect(received).toBe(expected) // Object.is equality\n\n    Expected: \"https://newhost.com/graphql\"\n    Received: \"https://newhost.com/graphqlhttps://api.example.com/graphql\"\n\n      55 |     // which causes the entire content to be replaced from the beginning\n      56 |     // This assertion should FAIL with the current buggy code\n    > 57 |     expect(newDoc).toBe(expectedUrl);\n         |                    ^\n      58 |   });\n      59 | });\n      60 |\n\n      at src/app/modules/altair/components/x-input/x-input.repro.spec.ts:57:20\n      at _ZoneDelegate.invoke (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone.umd.js:416:32)\n      at ProxyZoneSpec.Object.<anonymous>.ProxyZoneSpec.onInvoke (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone-testing.umd.js:2176:43)\n      at _ZoneDelegate.invoke (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone.umd.js:415:38)\n      at ZoneImpl.run (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone.umd.js:147:47)\n      at Object.wrappedFunc (../../node_modules/.pnpm/zone.js@0.14.10/node_modules/zone.js/bundles/zone-testing.umd.js:450:38)\n\nTest Suites: 1 failed, 1 total\nTests:       1 failed, 1 total\nSnapshots:   0 total\nTime:        0.877 s, estimated 1 s\n"
+  },
+  "escalation": "stage=fix exhausted 3 attempts. Last gate failure:\n[fix] output failed schema validation: [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [],\n    \"message\": \"Invalid input: expected object, received undefined\"\n  }\n]"
+}

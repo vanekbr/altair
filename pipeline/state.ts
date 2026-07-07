@@ -32,7 +32,9 @@ export type FixOutput = z.infer<typeof FixOutput>;
 
 export const CriticOutput = z.object({
   verdict: z.enum(['approve', 'reject']),
-  reasons: z.string().max(1200),
+  // max raised 1200 -> 4000 after run-2: a thorough rejection legitimately
+  // needs room; two critic attempts were wasted on length/format friction.
+  reasons: z.string().max(4000).describe('A single string (not an array), the review reasoning'),
   claims: z
     .array(
       z.object({

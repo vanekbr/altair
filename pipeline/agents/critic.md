@@ -32,5 +32,11 @@ claim it.
 
 ## Output
 
-JSON matching the provided schema: `verdict` (approve|reject), `reasons`,
-`claims` — each claim `{ text, cite: "file:line" }`.
+JSON matching the provided schema: `verdict` (approve|reject), `reasons`
+(ONE string, not an array — aim for under 250 words), `claims` — each claim
+`{ text, cite: "file:line" }`.
+
+Your rejection is routed to the fix agent verbatim, so write reasons it can
+act on: name the flaw, the location, and what a correct approach looks like.
+You will review the reworked diff with fresh eyes; you will never be asked
+to reconsider a standing rejection.

@@ -165,20 +165,29 @@ function runStage<T>(state: RunState, opts: StageOpts<T>): T {
       return result.output as T;
     }
   }
-  //  Escalation: attempts exhausted, hand to human
+  // ---- Escalation: attempts exhausted, hand to human -------------------
+  escalate(
+    state,
+    opts.stage,
+    `stage=${opts.stage} exhausted ${MAX_ATTEMPTS} attempts. Last gate failure:\n${lastError}`
+  );
+}
+
+/** Hand the run to a human: persist everything, print takeover instructions, stop. */
+function escalate(state: RunState, stage: string, reason: string): never {
   state.status = 'escalated';
-  state.escalation = `stage=${opts.stage} exhausted ${MAX_ATTEMPTS} attempts. Last gate failure:\n${lastError}`;
+  state.escalation = reason;
   saveState(state);
   appendTrace({
     ts: new Date().toISOString(),
     runId: state.runId,
-    stage: opts.stage,
+    stage,
     attempt: MAX_ATTEMPTS,
     event: 'escalated',
-    detail: lastError?.slice(0, 2000) ?? '',
+    detail: reason.slice(0, 2000),
   });
-  banner(`ESCALATED at stage=${opts.stage}`);
-  console.error(state.escalation);
+  banner(`ESCALATED at stage=${stage}`);
+  console.error(reason);
   console.error(
     `\nHuman takeover:\n  state:   pipeline/traces/${state.runId}/state.json`
   );
@@ -262,64 +271,108 @@ function main(): void {
   git(['add', repro.testFilePath]);
   git(['commit', '-m', `test: failing repro for "${issue.title}" [agent:repro]`]);
 
-  // ---- Stage 3: FIX  ------------
-  // Sees: hypothesis + failing test. Deliberately NOT the raw issue thread —
-  // the failing test IS the spec. Prompt orders a re-read before every edit
-  // (stale-context defense: repro just added a file, and retries mutate state).
-  const fix = runStage<FixOutput>(state, {
-    stage: 'fix',
-    schema: FixOutput,
-    allowedTools: [
-      'Read',
-      'Grep',
-      'Glob',
-      'Edit(packages/**)',
-      'Write(packages/**)',
-      'Bash(pnpm exec jest*)',
-      'Bash(cd*)',
-    ],
-    permissionMode: 'acceptEdits',
-    buildPrompt: (_, err) =>
-      `A bug was localized here:\n${triage.hypothesis}\nSuspect files: ${triage.files.join(', ')}\n\n` +
-      `This test reproduces it and currently FAILS: ${repro.testFilePath}\n` +
-      `Failing output:\n${state.repro!.failingOutput}\n\n` +
-      `Make this test pass without modifying it and without breaking anything else.` +
-      (err ? `\n\nYour previous attempt was rejected by a gate:\n${err}` : ''),
-    runGates: () => [
-      gates.gateNoTestEdits(baseBranch, repro.testFilePath),
-      gates.gateDiffNotEmpty(baseBranch),
-      gates.gateReproGreen(repro.testFilePath),
-      gates.gateFullGreen(),
-    ],
-  });
-  state.fix = { ...fix, attempts: 1 };
-  saveState(state);
-  git(['add', '--', 'packages', 'libs', 'plugins']);
-  git(['commit', '-m', `fix: ${issue.title} [agent:fix]`]);
+  // ---- Stages 3+4: FIX -> CRITIC review cycle -----------------------------
+  //
+  // Changed after run-2: a critic rejection used to re-run the
+  // CRITIC with its own rejection fed back as "gate feedback" — pressuring
+  // the reviewer to change its mind while the code stayed frozen. Backwards.
+  // Now a rejection routes the critic's reasons to the FIX agent (who can
+  // act on them) for a bounded number of review cycles; a standing rejection
+  // still escalates to a human. The critic is never asked to reconsider.
+  const MAX_REVIEW_CYCLES = 2;
+  let fix!: FixOutput;
+  let critic!: CriticOutput;
+  let criticFeedback: string | null = null;
 
-  // ---- Stage 4: CRITIC  ----------
-  // Sees: the diff + minimal context. Did not write the code, cannot edit it.
-  // Every claim must carry a file:line citation that a script then verifies.
-  const diff = git(['diff', baseBranch, '--', 'packages', 'libs', 'plugins']);
-  const critic = runStage<CriticOutput>(state, {
-    stage: 'critic',
-    schema: CriticOutput,
-    allowedTools: ['Read', 'Grep', 'Glob'],
-    buildPrompt: (_, err) =>
-      `Reported bug: ${issue.title}\nRepro test (already verified red->green): ${repro.testFilePath}\n\n` +
-      `Review this diff:\n\n${diff.slice(0, 30000)}` +
-      (err ? `\n\nYour previous attempt was rejected by a gate:\n${err}` : ''),
-    runGates: (out) => [
-      gates.gateCitations(out, baseBranch),
-      out.verdict === 'approve'
-        ? { ok: true, detail: 'critic approved' }
-        : { ok: false, detail: `critic rejected the fix:\n${out.reasons}` },
-    ],
-  });
-  state.critic = critic;
-  saveState(state);
+  for (let cycle = 1; cycle <= MAX_REVIEW_CYCLES; cycle++) {
+    // FIX (context-isolated): sees hypothesis + failing test — deliberately
+    // NOT the raw issue thread; the failing test IS the spec. Prompt orders a
+    // re-read before every edit (stale-context defense: repro just added a
+    // file, and retries/cycles mutate state).
+    fix = runStage<FixOutput>(state, {
+      stage: 'fix',
+      schema: FixOutput,
+      allowedTools: [
+        'Read',
+        'Grep',
+        'Glob',
+        'Edit(packages/**)',
+        'Write(packages/**)',
+        'Bash(pnpm exec jest*)',
+        'Bash(cd*)',
+      ],
+      permissionMode: 'acceptEdits',
+      buildPrompt: (_, err) =>
+        `A bug was localized here:\n${triage.hypothesis}\nSuspect files: ${triage.files.join(', ')}\n\n` +
+        `This test reproduces it and currently FAILS: ${repro.testFilePath}\n` +
+        `Failing output:\n${state.repro!.failingOutput}\n\n` +
+        `Make this test pass without modifying it and without breaking anything else.` +
+        (criticFeedback
+          ? `\n\nAn independent reviewer REJECTED your previous fix (already applied to the code you see). ` +
+            `Address every point — prefer simplifying or reworking over patching on top:\n${criticFeedback}`
+          : '') +
+        (err ? `\n\nYour previous attempt was rejected by a gate:\n${err}` : ''),
+      runGates: () => [
+        gates.gateNoTestEdits(baseBranch, repro.testFilePath),
+        gates.gateDiffNotEmpty(baseBranch),
+        gates.gateReproGreen(repro.testFilePath),
+        gates.gateFullGreen(),
+      ],
+    });
+    state.fix = { ...fix, attempts: cycle };
+    saveState(state);
+    git(['add', '--', 'packages', 'libs', 'plugins']);
+    git([
+      'commit',
+      '-m',
+      `fix: ${issue.title} [agent:fix]${cycle > 1 ? ` (review cycle ${cycle})` : ''}`,
+    ]);
 
-  // ---- Stage 5: PR ----------
+    // CRITIC (read-only, fresh eyes): sees the diff + minimal context. Did
+    // not write the code, cannot edit it, and is never retried over a
+    // standing rejection — only mechanical failures (schema, bad citations)
+    // are retriable for the critic.
+    const diff = git(['diff', baseBranch, '--', 'packages', 'libs', 'plugins']);
+    critic = runStage<CriticOutput>(state, {
+      stage: 'critic',
+      schema: CriticOutput,
+      allowedTools: ['Read', 'Grep', 'Glob'],
+      buildPrompt: (_, err) =>
+        `Reported bug: ${issue.title}\nRepro test (already verified red->green): ${repro.testFilePath}\n\n` +
+        `Review this diff:\n\n${diff.slice(0, 30000)}` +
+        (err ? `\n\nYour previous attempt was rejected by a gate:\n${err}` : ''),
+      runGates: (out) => [gates.gateCitations(out, baseBranch)],
+    });
+    state.critic = critic;
+    saveState(state);
+
+    if (critic.verdict === 'approve') break;
+
+    criticFeedback =
+      critic.reasons +
+      '\n' +
+      critic.claims.map((c) => `- ${c.text} (${c.cite})`).join('\n');
+    appendTrace({
+      ts: new Date().toISOString(),
+      runId: state.runId,
+      stage: 'critic',
+      attempt: cycle,
+      event: 'info',
+      detail: `rejected fix in review cycle ${cycle}; routing feedback to the fix agent`,
+    });
+    console.log(
+      `  critic \x1b[31mREJECTED\x1b[0m the fix (review cycle ${cycle}/${MAX_REVIEW_CYCLES}) — routing feedback to the fix agent`
+    );
+    if (cycle === MAX_REVIEW_CYCLES) {
+      escalate(
+        state,
+        'critic',
+        `fix still rejected after ${MAX_REVIEW_CYCLES} review cycles — the pipeline never merges over a standing rejection.\nLast review:\n${criticFeedback}`
+      );
+    }
+  }
+
+  // ---- Stage 5: PR (composition only, no repo access needed) -------------
   const pr = runStage<PrOutput>(state, {
     stage: 'pr',
     schema: PrOutput,
