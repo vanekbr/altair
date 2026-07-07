@@ -41,6 +41,51 @@ export function gateFilesExist(files: string[]): GateResult {
       };
 }
 
+/** GATE: the repro test must exercise the REAL code under test. */
+export function gateReproTestsRealCode(testFilePath: string, suspectFiles: string[]): GateResult {
+  const abs = path.join(REPO_ROOT, testFilePath);
+  if (!fs.existsSync(abs)) {
+    return { ok: false, detail: `test file ${testFilePath} does not exist on disk` };
+  }
+  const src = fs.readFileSync(abs, 'utf8');
+  const relImports = [...src.matchAll(/from\s+['"]([^'"]+)['"]/g)]
+    .map((m) => m[1])
+    .filter((s) => s.startsWith('.'));
+  const testDir = path.dirname(abs);
+  const resolved: string[] = [];
+  for (const imp of relImports) {
+    for (const suffix of ['', '.ts', '.tsx', '/index.ts']) {
+      const p = path.resolve(testDir, imp + suffix);
+      if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+        resolved.push(path.relative(REPO_ROOT, p));
+        break;
+      }
+    }
+  }
+  const sourceImports = resolved.filter((f) => !/\.spec\.ts$/.test(f));
+  if (sourceImports.length === 0) {
+    return {
+      ok: false,
+      detail:
+        `the repro test imports NO source file from this repository. A test that re-implements or ` +
+        `simulates the suspected bug inside itself proves nothing about the real code. Import and ` +
+        `exercise the actual module under test (e.g. one of: ${suspectFiles.join(', ')}).`,
+    };
+  }
+  const suspectBases = suspectFiles.map((f) => path.basename(f).replace(/\.tsx?$/, ''));
+  const touchesSuspect = sourceImports.some((f) =>
+    suspectBases.includes(path.basename(f).replace(/\.tsx?$/, ''))
+  );
+  return touchesSuspect
+    ? { ok: true, detail: `repro imports real source under test: ${sourceImports.join(', ')}` }
+    : {
+        ok: false,
+        detail:
+          `the repro test imports ${sourceImports.join(', ')} but none of the triage suspect files ` +
+          `(${suspectFiles.join(', ')}). Test the code the bug actually lives in.`,
+      };
+}
+
 /** GATE: the repro test MUST FAIL on the current (buggy) code. */
 export function gateMustFail(testFilePath: string): GateResult {
   if (!fs.existsSync(path.join(REPO_ROOT, testFilePath))) {

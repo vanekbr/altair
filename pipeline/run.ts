@@ -146,7 +146,7 @@ function runStage<T>(state: RunState, opts: StageOpts<T>): T {
         detail: g.detail.slice(0, 2000),
       });
       console.log(
-        `  gate ${i}: ${g.ok ? '\x1b[32mPASS\x1b[0m' : '\x1b[31mFAIL\x1b[0m'} — ${g.detail.split('\n')[0].slice(0, 120)}`
+        `  gate ${i}: ${g.ok ? '\x1b[32mPASS\x1b[0m' : '\x1b[31mFAIL\x1b[0m'} — ${g.detail.trim().split('\n')[0].slice(0, 120)}`
       );
       if (!g.ok) {
         lastError = g.detail;
@@ -250,7 +250,11 @@ function main(): void {
       `Triage hypothesis (verify, don't trust blindly):\n${triage.hypothesis}\nSuspect files: ${triage.files.join(', ')}\n\n` +
       `Write ONE new failing test that reproduces this bug.` +
       (err ? `\n\nYour previous attempt was rejected by a gate:\n${err}` : ''),
-    runGates: (out) => [gates.gateMustFail(out.testFilePath)],
+    runGates: (out) => [
+      // coupling first (cheap), redness second (runs jest)
+      gates.gateReproTestsRealCode(out.testFilePath, triage.files),
+      gates.gateMustFail(out.testFilePath),
+    ],
   });
   const mustFailDetail = gates.gateMustFail(repro.testFilePath); // capture red output for state/PR
   state.repro = { ...repro, failingOutput: mustFailDetail.detail.slice(-2000) };

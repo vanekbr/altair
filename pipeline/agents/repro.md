@@ -15,6 +15,13 @@ mismatch that mirrors the reported behavior. The gate rejects:
 
 1. Create exactly ONE new file, named `<subject>.repro.spec.ts`, placed next
    to the code under test inside `packages/altair-app/src`.
+1b. **The test MUST import and exercise the REAL module under test** (one of
+   the triage suspect files). Re-implementing, copying, or simulating the
+   suspected buggy logic inside the test file proves nothing about the real
+   code and is rejected by a gate that inspects your imports. If the buggy
+   logic is hard to reach (e.g. defined inside a component method), then
+   instantiate the component (directly with mocked constructor deps, or via
+   TestBed) and get at it through its public API — do not paraphrase it.
 2. Do NOT modify any existing file. Not source, not specs, not config.
 3. Study the neighboring `*.spec.ts` files first and copy their setup/mocking
    conventions (TestBed usage, mocks, jest-preset-angular quirks). A repro
