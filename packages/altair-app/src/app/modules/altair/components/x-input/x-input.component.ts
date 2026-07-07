@@ -140,18 +140,9 @@ export class XInputComponent implements AfterViewInit, ControlValueAccessor {
         // For paste events, replace newlines with spaces in the pasted content
         const changes: ChangeSpec[] = [];
         tr.changes.iterChanges((fromA, toA, fromB, toB, insert) => {
-          // Check if we need to extend the selection to include the full token
-          let adjustedTo = toA;
-          if (toA < tr.startState.doc.length) {
-            const nextChar = tr.startState.doc.slice(toA, toA + 1).toString();
-            // Extend range if next character is part of a domain/URL token
-            if (/[a-zA-Z0-9.-]/.test(nextChar)) {
-              adjustedTo = toA + 1;
-            }
-          }
           changes.push({
             from: fromA,
-            to: adjustedTo,
+            to: toA,
             insert: insert.toString().replace(/\n/g, ' ')
           });
         });

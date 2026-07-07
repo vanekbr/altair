@@ -43,10 +43,10 @@ describe('XInputComponent paste bug', () => {
       extensions: extensions,
     });
 
-    // Create a transaction that pastes "new.site" over "example.com" (positions 8-18)
+    // Create a transaction that pastes "new.site" over "example.com" (positions 8-19)
     // This simulates user selecting "example.com" and pasting "new.site"
     const tr = state.update({
-      changes: [{ from: 8, to: 18, insert: 'new.site' }],
+      changes: [{ from: 8, to: 19, insert: 'new.site' }],
       userEvent: 'input.paste',
     });
 
