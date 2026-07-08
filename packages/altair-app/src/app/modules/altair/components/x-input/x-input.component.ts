@@ -137,17 +137,10 @@ export class XInputComponent implements AfterViewInit, ControlValueAccessor {
       if (tr.changes.empty) return tr;
 
       if (tr.isUserEvent('input.paste')) {
-        // For paste events, replace newlines with spaces and handle duplicate slashes
+        // For paste events, replace newlines with spaces
         const changes: ChangeSpec[] = [];
         tr.changes.iterChanges((fromA, toA, fromB, toB, insert) => {
-          let insertText = insert.toString().replace(/\n/g, ' ');
-          // Remove leading slash if preceded by a slash
-          if (fromA > 0) {
-            const charBefore = tr.startState.doc.sliceString(fromA - 1, fromA);
-            if (charBefore === '/' && insertText.startsWith('/')) {
-              insertText = insertText.slice(1);
-            }
-          }
+          const insertText = insert.toString().replace(/\n/g, ' ');
           changes.push({
             from: fromA,
             to: toA,

@@ -43,8 +43,8 @@ describe('XInputComponent - Paste Bug Reproduction', () => {
     });
 
     // Simulate selecting part of the URL (e.g., the path "/graphql")
-    // Selection: from index 24 ("/") to end of URL (32)
-    const selectedFrom = 24;
+    // Selection: from index 23 ("/") to end of URL (31)
+    const selectedFrom = 23;
     const selectedTo = initialUrl.length;
 
     // Create a transaction that simulates a paste event
