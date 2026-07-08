@@ -138,13 +138,16 @@ export class XInputComponent implements AfterViewInit, ControlValueAccessor {
 
       if (tr.isUserEvent('input.paste')) {
         // For paste events, replace newlines with spaces
-        const changes = [
-          {
-            from: 0,
-            insert: tr.newDoc.toString().replace(/\n/g, ' '),
-          },
-        ];
-        return [{ changes }];
+        const changes: ChangeSpec[] = [];
+        tr.changes.iterChanges((fromA, toA, fromB, toB, insert) => {
+          const insertText = insert.toString().replace(/\n/g, ' ');
+          changes.push({
+            from: fromA,
+            to: toA,
+            insert: insertText,
+          });
+        });
+        return tr.startState.update({ changes });
       }
 
       // Block multi-line input from other sources
